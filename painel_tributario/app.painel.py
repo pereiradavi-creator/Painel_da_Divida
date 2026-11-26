@@ -763,5 +763,5 @@ def main() -> None:
         aba_modelos_subgrupos(base, meta)
 
 
-    if __name__ == "__main__":
+if __name__ == "__main__":
     main()
