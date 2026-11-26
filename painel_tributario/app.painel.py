@@ -759,4 +759,9 @@ def main() -> None:
         aba_projecao(devedores)
     with aba4:
         aba_carteira(situacao, base)
-    with aba
+    with aba5:
+        aba_modelos_subgrupos(base, meta)
+
+
+    if __name__ == "__main__":
+    main()
