@@ -68,6 +68,8 @@ button[data-baseweb="tab"]{font-weight:700}
 button[data-baseweb="tab"][aria-selected="true"]{color:#00B26F !important}
 div[data-baseweb="tab-highlight"]{background-color:#00B26F !important;height:3px}
 div[data-baseweb="slider"] [role="slider"]{background-color:#00B26F !important}
+.rodape{margin-top:2rem;padding-top:.8rem;border-top:1px solid rgba(128,128,128,.25);
+        font-size:.82rem;opacity:.8;text-align:center}
 </style>
 """
 
@@ -240,7 +242,7 @@ def projecao(devedores: pd.DataFrame, variacao: float) -> tuple[float, float, fl
 # Interface
 # --------------------------------------------------------------------------- #
 def simulador_caso(base: pd.DataFrame, meta: dict, modelo_inad, modelo_rec) -> None:
-    """Consulta de registro sintético + simulação 'E se...' para demonstração."""
+    """Consulta de registro sintético + simulação 'E se...' com proteção contra ausência de colunas."""
     with st.expander("Consultar contribuinte sintético ou simular cenário ('E se...')"):
         if base.empty:
             st.info("Sem registros elegíveis para simulação.")
@@ -254,41 +256,50 @@ def simulador_caso(base: pd.DataFrame, meta: dict, modelo_inad, modelo_rec) -> N
             key="simulador_id",
         )
         registro = base[base[COL_ID].astype(str) == id_escolhido].iloc[0].copy()
+        atributos = meta["atributos_entrada"]
 
-        c1, c2, c3, c4 = st.columns(4)
-        divida_sim = c1.number_input(
-            "Dívida consolidada (R$)",
-            min_value=0.0,
-            value=float(registro["valor_divida_consolidada"]),
-            step=100.0,
-        )
-        dias_sim = c2.number_input(
-            "Tempo inadimplência (dias)",
-            min_value=0,
-            value=int(registro["tempo_inadimplencia_dias"]),
-            step=30,
-        )
-        parc_sim = c3.number_input(
-            "Parcelamentos anteriores",
-            min_value=0,
-            max_value=20,
-            value=int(registro["qtd_parcelamentos_anteriores"]),
-            step=1,
-        )
-        notif_sim = c4.number_input(
-            "Notificações emitidas",
-            min_value=0,
-            max_value=30,
-            value=int(registro["qtd_notificacoes"]),
-            step=1,
-        )
+        cols = st.columns(4)
+        idx_col = 0
 
-        registro["valor_divida_consolidada"] = divida_sim
-        registro["tempo_inadimplencia_dias"] = dias_sim
-        registro["qtd_parcelamentos_anteriores"] = parc_sim
-        registro["qtd_notificacoes"] = notif_sim
+        if "valor_divida_consolidada" in atributos:
+            registro["valor_divida_consolidada"] = cols[idx_col % 4].number_input(
+                "Dívida consolidada (R$)",
+                min_value=0.0,
+                value=float(registro["valor_divida_consolidada"]),
+                step=100.0,
+            )
+            idx_col += 1
 
-        X_caso = pd.DataFrame([registro[meta["atributos_entrada"]]])
+        if "tempo_inadimplencia_dias" in atributos:
+            registro["tempo_inadimplencia_dias"] = cols[idx_col % 4].number_input(
+                "Tempo inadimplência (dias)",
+                min_value=0,
+                value=int(registro["tempo_inadimplencia_dias"]),
+                step=30,
+            )
+            idx_col += 1
+
+        if "qtd_parcelamentos_anteriores" in atributos:
+            registro["qtd_parcelamentos_anteriores"] = cols[idx_col % 4].number_input(
+                "Parcelamentos anteriores",
+                min_value=0,
+                max_value=20,
+                value=int(registro["qtd_parcelamentos_anteriores"]),
+                step=1,
+            )
+            idx_col += 1
+
+        if "qtd_notificacoes" in atributos:
+            registro["qtd_notificacoes"] = cols[idx_col % 4].number_input(
+                "Notificações emitidas",
+                min_value=0,
+                max_value=30,
+                value=int(registro["qtd_notificacoes"]),
+                step=1,
+            )
+
+        divida_sim = float(registro.get("valor_divida_consolidada", 0.0))
+        X_caso = pd.DataFrame([registro[atributos]])
         prob_inad = float(_proba_positiva(modelo_inad, X_caso)[0])
         limiar = meta["modelo_1_inadimplencia"]["limiar_operacional"]
 
@@ -644,6 +655,38 @@ def aba_modelos_subgrupos(base: pd.DataFrame, meta: dict) -> None:
             },
         )
 
+        df_long = sub_renda.melt(
+            id_vars="faixa_renda_setor",
+            value_vars=["risco_medio", "recup_media"],
+            var_name="indicador",
+            value_name="taxa",
+        )
+        df_long["indicador"] = df_long["indicador"].map(
+            {"risco_medio": "Risco médio previsto", "recup_media": "Recuperabilidade média"}
+        )
+        grafico_sub = (
+            alt.Chart(df_long)
+            .mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5)
+            .encode(
+                x=alt.X("faixa_renda_setor:N", sort=ORDEM_RENDA, title="Faixa de renda do setor", axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("taxa:Q", title="Média do grupo", axis=alt.Axis(format="%")),
+                xOffset="indicador:N",
+                color=alt.Color(
+                    "indicador:N",
+                    title=None,
+                    scale=alt.Scale(range=[LARANJA, VERDE]),
+                    legend=alt.Legend(orient="bottom"),
+                ),
+                tooltip=[
+                    alt.Tooltip("faixa_renda_setor:N", title="Faixa de renda"),
+                    alt.Tooltip("indicador:N", title="Indicador"),
+                    alt.Tooltip("taxa:Q", title="Valor", format=".1%"),
+                ],
+            )
+            .properties(title="Comparativo entre subgrupos socioeconômicos (base sintética)", height=280)
+        )
+        mostrar_grafico(grafico_sub)
+
 
 def barra_lateral(meta: dict) -> None:
     import sklearn
@@ -761,6 +804,13 @@ def main() -> None:
         aba_carteira(situacao, base)
     with aba5:
         aba_modelos_subgrupos(base, meta)
+
+    st.markdown(
+        '<div class="rodape">Projeto Integrador BIINAR · Eixo II (2026/2) — '
+        "Camada individual sintética para fins acadêmicos · Imóveis IPTU Social excluídos por regra de negócio · "
+        "Ferramenta de apoio à decisão humana.</div>",
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
